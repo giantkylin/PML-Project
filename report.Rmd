@@ -1,0 +1,126 @@
+---
+title: "Practical Machine Learning Project"
+author: "Yue Ke"
+date: "November 21, 2015"
+output: html_document
+---
+
+#Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it.
+
+In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+#Data Preprocess
+1. Load Data
+```{r}
+getwd()
+setwd("/Users/yue/Documents/DataCourses/PML/project/")
+getwd()
+trainURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+testURL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+trainData <- "./data/pml-training.csv"
+testData <- "./data/pml-testing.csv"
+if(!file.exists("./data")){
+  dir.create("./data", showWarnings = TRUE)
+}
+if(!file.exists(trainData)){
+  download.file(trainURL, destfile = trainData, method = 'curl')
+}
+if(!file.exists(testData)){
+  download.file(testURL, destfile = testData, method = 'curl')
+}
+trainSet <- read.csv(trainData, na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+PredictSet <- read.csv(testData, na.strings = c("NA", "#DIV/0!", ""), header = TRUE)
+```
+
+2. R package Load
+```{r}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(corrplot)
+library(rattle)
+```
+
+3. Data Preprocess
+```{r}
+# Remove columns containing NA values
+dim(trainSet)  # 19622x160
+trainSet <- trainSet[, colSums(is.na(trainSet)) == 0] # 19622x100
+PredictSet <- PredictSet[, colSums(is.na(PredictSet)) == 0]
+# Remove some columns with no variance
+nzv <- nearZeroVar(trainSet)
+trainSet <- trainSet[, -nzv]  
+PredictSet <- PredictSet[, -nzv]
+dim(trainSet)  # 19622x59
+# Remove other columns that are unrelated based on model physics
+rmv = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+trainSet <- trainSet[, -which(names(trainSet) %in% rmv)]
+PredictSet <- PredictSet[, -which(names(PredictSet) %in% rmv)]
+dim(trainSet)  # 19622x53
+set.seed(123456)
+inTrain <- createDataPartition(trainSet$classe, p = 0.6, list=F)
+trainingData <- trainSet[inTrain, ]
+testingData <- trainSet[-inTrain,]
+dim(trainingData)  # 11776x53
+dim(testingData)  # 7846x53
+#dim(PredictSet)  # 19622x53
+```
+
+# Data Modeling
+1. Decision Tree
+```{r}
+modelDT <- rpart(classe ~ ., data = trainingData, method = 'class')
+fancyRpartPlot(modelDT)
+```
+Prediction on the test set
+```{r}
+predictionDT <- predict(modelDT, testingData, type = 'class')
+confusionMatrix(predictionDT, testingData$classe)
+```
+The prediction very good, almost too good.
+
+2. Random Forests
+```{r}
+modelRF <- train(classe ~ ., data = trainingData, method = "rf", trControl = trainControl(method = "cv", 5), ntree  = 250)
+varImpPlot(modelRF$finalModel)
+```
+Prediction on the test set
+```{r}
+predictionRF <- predict(modelRF, testingData)
+confusionMatrix(predictionRF, testingData$classe)
+```
+Performance estimation comparison between decision tree and random forest methods
+```{r}
+accuracyDT <- postResample(predictionDT, testingData$classe)
+accuracyRF <- postResample(predictionRF, testingData$classe)
+accuracyDT
+accuracyRF
+```
+
+# Predicting the actual test Data Set using Random Forest Model
+Apply the model to the acutal test data set
+```{r}
+result <- predict(modelRF, PredictSet)
+result
+```
+Function to generate files with predictions
+```{r}
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+pml_write_files(result)
+```
+
+# Conclusion
+Data cleaning was performed on the training dataset to remove columns that have NA values, zero variance and physically unrelated. This is the key step for mdoel building in the 2nd part.
+
+Two models were tested including decision tree and random forest. Random Tree Model provides the best clasifier with 99.1% accuracy. The decision tree out of box is not doing as good job, which only gives about 72.8% accuracy. 
+
+The model is then used to predict the actual test sample. The files will be uploaded for further evaluation.
